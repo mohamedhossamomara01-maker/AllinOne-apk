@@ -1,0 +1,11 @@
+{
+  "appId": "com.allinone.app",
+  "appName": "AllinOne",
+  "webDir": "www",
+  "server": {
+    "url": "https://mohamedhossamomara01-maker.github.io/AllinOne/",
+    "androidScheme": "https",
+    "allowNavigation": ["mohamedhossamomara01-maker.github.io"]
+  },
+  "android": { "allowMixedContent": false }
+}
