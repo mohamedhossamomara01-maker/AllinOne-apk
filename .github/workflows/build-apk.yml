@@ -16,7 +16,7 @@ jobs:
         run: npm install
       - name: Add Android platform
         run: npx cap add android
-      - name: Adhan sound (adhan.mp3 في الريبو لو موجود، وإلا من archive.org)
+      - name: Adhan sound
         run: |
           mkdir -p android/app/src/main/res/raw
           if [ -f adhan.mp3 ]; then cp adhan.mp3 android/app/src/main/res/raw/adhan.mp3
@@ -29,8 +29,10 @@ jobs:
             fi
           fi
           ls -la android/app/src/main/res/raw
-      - name: Permissions + icon
+      - name: Permissions and icon
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick
           M=android/app/src/main/AndroidManifest.xml
           sed -i 's#</manifest>#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/><uses-permission android:name="android.permission.USE_EXACT_ALARM"/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/><uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/><uses-permission android:name="android.permission.WAKE_LOCK"/><uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/><uses-permission android:name="android.permission.VIBRATE"/></manifest>#' $M
           R=android/app/src/main/res
