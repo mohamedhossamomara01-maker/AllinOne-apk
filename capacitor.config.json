@@ -7,5 +7,11 @@
     "androidScheme": "https",
     "allowNavigation": ["mohamedhossamomara01-maker.github.io"]
   },
-  "android": { "allowMixedContent": false }
+  "android": { "allowMixedContent": false },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon",
+      "iconColor": "#1F7A80"
+    }
+  }
 }
