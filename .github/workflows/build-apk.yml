@@ -31,11 +31,9 @@ jobs:
           ls -la android/app/src/main/res/raw
       - name: Permissions and icon
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq imagemagick
           mkdir -p android/app/src/main/res/drawable
           cat > android/app/src/main/res/drawable/ic_stat_icon.xml <<'XML'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:fillColor="#FFFFFFFF" android:pathData="M12,3a9,9 0 1,0 9,9 7,7 0 0,1 -9,-9z"/></vector>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.3" android:pathData="M12,1.8a10.2,10.2 0 1,0 0.01,0z"/><path android:fillColor="#FFFFFFFF" android:pathData="M7.2,17.2C7.2,13.8 9.6,12 12,10.4C14.4,12 16.8,13.8 16.8,17.2z M11.5,10.6h1v-1.4h-1z M12.9,4.2a2.1,2.1 0 1,0 0,3.6a1.7,1.7 0 1,1 0,-3.6z M6,17.7h12v1.6h-12z M4.4,17.7V12l1,-1.8l1,1.8v5.7z M17.6,17.7V12l1,-1.8l1,1.8v5.7z"/></vector>
           XML
           M=android/app/src/main/AndroidManifest.xml
           sed -i 's#</manifest>#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/><uses-permission android:name="android.permission.USE_EXACT_ALARM"/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/><uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/><uses-permission android:name="android.permission.WAKE_LOCK"/><uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/><uses-permission android:name="android.permission.VIBRATE"/></manifest>#' $M
@@ -47,6 +45,8 @@ jobs:
             convert icon-512.png -resize ${s}x${s} $R/mipmap-$d/ic_launcher_round.png
             rm -f $R/mipmap-$d/ic_launcher_foreground.png
           done
+          mkdir -p $R/drawable-nodpi
+          convert icon-512.png -resize 192x192 $R/drawable-nodpi/ic_large.png
       - name: Sync
         run: npx cap sync android
       - name: Build debug APK
