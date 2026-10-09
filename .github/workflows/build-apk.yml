@@ -49,6 +49,117 @@ jobs:
           done
           mkdir -p $R/drawable-nodpi
           convert icon-512.png -resize 192x192 $R/drawable-nodpi/ic_large.png
+      - name: Prayer widget
+        run: |
+          R=android/app/src/main/res
+          J=android/app/src/main/java/com/allinone/app
+          mkdir -p $R/layout $R/xml $R/drawable $J
+          cat > $J/PrayerWidget.java <<'EOF_J'
+          package com.allinone.app;
+
+          import android.app.AlarmManager;
+          import android.app.PendingIntent;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProvider;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.widget.RemoteViews;
+          import org.json.JSONObject;
+          import java.util.Calendar;
+
+          public class PrayerWidget extends AppWidgetProvider {
+              static final String TICK = "com.allinone.app.WIDGET_TICK";
+              static final String[] KEYS = {"Fajr", "Sunrise", "Dhuhr", "Asr", "Maghrib", "Isha"};
+              static final String[] NAMES = {"الفجر", "الشروق", "الظهر", "العصر", "المغرب", "العشاء"};
+              static final int[] NID = {R.id.n0, R.id.n1, R.id.n2, R.id.n3, R.id.n4, R.id.n5};
+              static final int[] TID = {R.id.t0, R.id.t1, R.id.t2, R.id.t3, R.id.t4, R.id.t5};
+
+              @Override
+              public void onUpdate(Context c, AppWidgetManager m, int[] ids) {
+                  for (int id : ids) update(c, m, id);
+              }
+
+              @Override
+              public void onReceive(Context c, Intent i) {
+                  super.onReceive(c, i);
+                  if (TICK.equals(i.getAction())) {
+                      AppWidgetManager m = AppWidgetManager.getInstance(c);
+                      int[] ids = m.getAppWidgetIds(new ComponentName(c, PrayerWidget.class));
+                      for (int id : ids) update(c, m, id);
+                  }
+              }
+
+              static String fmt(int mins) {
+                  int h = mins / 60, mm = mins % 60;
+                  int h12 = h % 12 == 0 ? 12 : h % 12;
+                  return h12 + ":" + (mm < 10 ? "0" : "") + mm + (h >= 12 ? " م" : " ص");
+              }
+
+              static void update(Context c, AppWidgetManager m, int id) {
+                  RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.prayer_widget);
+                  int[] mins = new int[6];
+                  boolean ok = false;
+                  try {
+                      String s = c.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE).getString("prayer_widget", null);
+                      if (s != null) {
+                          JSONObject j = new JSONObject(s);
+                          Calendar n = Calendar.getInstance();
+                          String key = n.get(Calendar.YEAR) + "-" + (n.get(Calendar.MONTH) + 1) + "-" + n.get(Calendar.DAY_OF_MONTH);
+                          JSONObject o = j.optJSONObject(key);
+                          if (o != null) {
+                              for (int i = 0; i < 6; i++) mins[i] = o.optInt(KEYS[i], -1);
+                              ok = true;
+                          }
+                      }
+                  } catch (Exception e) { ok = false; }
+                  Calendar now = Calendar.getInstance();
+                  int nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
+                  int next = -1;
+                  if (ok) {
+                      for (int i = 0; i < 6; i++) { if (i == 1) continue; if (mins[i] > nowMin) { next = i; break; } }
+                      for (int i = 0; i < 6; i++) {
+                          v.setTextViewText(NID[i], NAMES[i]);
+                          v.setTextViewText(TID[i], mins[i] >= 0 ? fmt(mins[i]) : "--");
+                          int col = (i == next) ? Color.parseColor("#F5B942") : Color.WHITE;
+                          v.setTextColor(NID[i], col);
+                          v.setTextColor(TID[i], col);
+                      }
+                      v.setTextViewText(R.id.title, next >= 0 ? "الصلاة الجاية: " + NAMES[next] + " " + fmt(mins[next]) : "خلصت صلوات النهاردة");
+                  } else {
+                      for (int i = 0; i < 6; i++) { v.setTextViewText(NID[i], NAMES[i]); v.setTextViewText(TID[i], "--"); }
+                      v.setTextViewText(R.id.title, "افتح التطبيق مرة عشان تظهر المواقيت");
+                  }
+                  Intent launch = c.getPackageManager().getLaunchIntentForPackage(c.getPackageName());
+                  if (launch != null) {
+                      v.setOnClickPendingIntent(R.id.root, PendingIntent.getActivity(c, 0, launch, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+                  }
+                  m.updateAppWidget(id, v);
+                  try {
+                      int target = next >= 0 ? mins[next] + 1 : 24 * 60 + 1;
+                      Calendar t = Calendar.getInstance();
+                      t.set(Calendar.HOUR_OF_DAY, 0); t.set(Calendar.MINUTE, 0); t.set(Calendar.SECOND, 0); t.set(Calendar.MILLISECOND, 0);
+                      t.add(Calendar.MINUTE, target);
+                      AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+                      Intent ti = new Intent(c, PrayerWidget.class);
+                      ti.setAction(TICK);
+                      PendingIntent pi = PendingIntent.getBroadcast(c, 77, ti, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                      am.set(AlarmManager.RTC, t.getTimeInMillis(), pi);
+                  } catch (Exception e) { }
+              }
+          }
+          EOF_J
+          cat > $R/layout/prayer_widget.xml <<'EOF_L'
+          <?xml version="1.0" encoding="utf-8"?><LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="10dp" android:gravity="center" android:background="@drawable/widget_bg" android:layoutDirection="rtl"><TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#F5B942" android:textSize="12sp" android:textStyle="bold" android:text="مواقيت الصلاة"/><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:layoutDirection="rtl"><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout></LinearLayout></LinearLayout>
+          EOF_L
+          cat > $R/drawable/widget_bg.xml <<'EOF_B'
+          <?xml version="1.0" encoding="utf-8"?><shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle"><solid android:color="#E60F2A2D"/><corners android:radius="18dp"/></shape>
+          EOF_B
+          cat > $R/xml/prayer_widget_info.xml <<'EOF_I'
+          <?xml version="1.0" encoding="utf-8"?><appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" android:minWidth="250dp" android:minHeight="70dp" android:updatePeriodMillis="1800000" android:initialLayout="@layout/prayer_widget" android:resizeMode="horizontal" android:widgetCategory="home_screen"/>
+          EOF_I
+          sed -i 's#</application>#<receiver android:name=".PrayerWidget" android:exported="true"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/><action android:name="com.allinone.app.WIDGET_TICK"/></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/prayer_widget_info"/></receiver></application>#' android/app/src/main/AndroidManifest.xml
       - name: Sync
         run: npx cap sync android
       - name: Build debug APK
