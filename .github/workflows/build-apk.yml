@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -198,9 +200,37 @@ jobs:
           sed -i 's#</application>#<receiver android:name=".PrayerWidget" android:exported="true"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/><action android:name="com.allinone.app.WIDGET_TICK"/></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/prayer_widget_info"/></receiver></application>#' android/app/src/main/AndroidManifest.xml
       - name: Sync
         run: npx cap sync android
+      - name: Fixed signing key (auto)
+        env:
+          KS: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          mkdir -p ~/.android keystore
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > ~/.android/debug.keystore; echo "using key from secret"
+          elif [ -f keystore/debug.keystore ]; then
+            cp keystore/debug.keystore ~/.android/debug.keystore; echo "using key from repo"
+          else
+            keytool -genkeypair -keystore keystore/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=AllinOne,O=AllinOne,C=EG"
+            cp keystore/debug.keystore ~/.android/debug.keystore
+            git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+            git add keystore/debug.keystore && git commit -m "add signing key" && git push || echo "could not push key"
+            echo "created new key"
+          fi
       - name: Build debug APK
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - name: Prepare APK file
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk AllinOne.apk
       - uses: actions/upload-artifact@v4
         with:
           name: AllinOne-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: AllinOne.apk
+      - name: Publish as latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: AllinOne v1.0.${{ github.run_number }}
+          body: |
+            آخر إصدار ✅ — اتبنى تلقائيًا.
+            ${{ github.event.head_commit.message }}
+          files: AllinOne.apk
+          make_latest: true
