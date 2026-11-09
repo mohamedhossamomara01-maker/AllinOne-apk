@@ -67,6 +67,7 @@ jobs:
           public class MainActivity extends BridgeActivity {
               @Override
               public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(WidgetPin.class);
                   super.onCreate(savedInstanceState);
                   try {
                       if (Build.VERSION.SDK_INT >= 26) {
@@ -103,6 +104,9 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.graphics.Color;
+          import android.os.Build;
+          import android.os.SystemClock;
+          import android.view.View;
           import android.widget.RemoteViews;
           import org.json.JSONObject;
           import java.util.Calendar;
@@ -122,7 +126,8 @@ jobs:
               @Override
               public void onReceive(Context c, Intent i) {
                   super.onReceive(c, i);
-                  if (TICK.equals(i.getAction())) {
+                  String a = i.getAction();
+                  if (TICK.equals(a) || Intent.ACTION_BOOT_COMPLETED.equals(a) || Intent.ACTION_TIME_CHANGED.equals(a) || Intent.ACTION_TIMEZONE_CHANGED.equals(a)) {
                       AppWidgetManager m = AppWidgetManager.getInstance(c);
                       int[] ids = m.getAppWidgetIds(new ComponentName(c, PrayerWidget.class));
                       for (int id : ids) update(c, m, id);
@@ -135,28 +140,52 @@ jobs:
                   return h12 + ":" + (mm < 10 ? "0" : "") + mm + (h >= 12 ? " م" : " ص");
               }
 
+              static String keyFor(Calendar n, int add) {
+                  Calendar t = (Calendar) n.clone();
+                  t.add(Calendar.DAY_OF_MONTH, add);
+                  return t.get(Calendar.YEAR) + "-" + (t.get(Calendar.MONTH) + 1) + "-" + t.get(Calendar.DAY_OF_MONTH);
+              }
+
               static void update(Context c, AppWidgetManager m, int id) {
                   RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.prayer_widget);
                   int[] mins = new int[6];
-                  boolean ok = false;
+                  int[] tm = new int[6];
+                  boolean ok = false, okT = false;
                   try {
                       String s = c.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE).getString("prayer_widget", null);
                       if (s != null) {
                           JSONObject j = new JSONObject(s);
                           Calendar n = Calendar.getInstance();
-                          String key = n.get(Calendar.YEAR) + "-" + (n.get(Calendar.MONTH) + 1) + "-" + n.get(Calendar.DAY_OF_MONTH);
-                          JSONObject o = j.optJSONObject(key);
+                          JSONObject o = j.optJSONObject(keyFor(n, 0));
                           if (o != null) {
                               for (int i = 0; i < 6; i++) mins[i] = o.optInt(KEYS[i], -1);
                               ok = true;
                           }
+                          JSONObject o2 = j.optJSONObject(keyFor(n, 1));
+                          if (o2 != null) {
+                              for (int i = 0; i < 6; i++) tm[i] = o2.optInt(KEYS[i], -1);
+                              okT = true;
+                          }
                       }
                   } catch (Exception e) { ok = false; }
                   Calendar now = Calendar.getInstance();
+                  long nowMs = now.getTimeInMillis();
                   int nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
-                  int next = -1;
+                  int next = -1, nextMin = -1;
+                  boolean tomorrow = false;
                   if (ok) {
-                      for (int i = 0; i < 6; i++) { if (i == 1) continue; if (mins[i] > nowMin) { next = i; break; } }
+                      for (int i = 0; i < 6; i++) { if (i == 1) continue; if (mins[i] > nowMin) { next = i; nextMin = mins[i]; break; } }
+                      if (next < 0 && okT && tm[0] >= 0) { next = 0; nextMin = tm[0]; tomorrow = true; }
+                  }
+                  long nextMs = 0;
+                  if (next >= 0) {
+                      Calendar t = Calendar.getInstance();
+                      t.set(Calendar.HOUR_OF_DAY, 0); t.set(Calendar.MINUTE, 0); t.set(Calendar.SECOND, 0); t.set(Calendar.MILLISECOND, 0);
+                      if (tomorrow) t.add(Calendar.DAY_OF_MONTH, 1);
+                      t.add(Calendar.MINUTE, nextMin);
+                      nextMs = t.getTimeInMillis();
+                  }
+                  if (ok) {
                       for (int i = 0; i < 6; i++) {
                           v.setTextViewText(NID[i], NAMES[i]);
                           v.setTextViewText(TID[i], mins[i] >= 0 ? fmt(mins[i]) : "--");
@@ -164,9 +193,26 @@ jobs:
                           v.setTextColor(NID[i], col);
                           v.setTextColor(TID[i], col);
                       }
-                      v.setTextViewText(R.id.title, next >= 0 ? "الصلاة الجاية: " + NAMES[next] + " " + fmt(mins[next]) : "خلصت صلوات النهاردة");
+                      if (next >= 0) {
+                          String title = "الصلاة الجاية: " + NAMES[next] + (tomorrow ? " (بكرة) " : " ") + fmt(nextMin);
+                          long left = nextMs - nowMs;
+                          if (Build.VERSION.SDK_INT >= 24 && left > 0) {
+                              v.setTextViewText(R.id.title, title);
+                              v.setViewVisibility(R.id.cd, View.VISIBLE);
+                              v.setChronometerCountDown(R.id.cd, true);
+                              v.setChronometer(R.id.cd, SystemClock.elapsedRealtime() + left, "متبقي %s", true);
+                          } else {
+                              long mn = Math.max(0, left / 60000);
+                              v.setViewVisibility(R.id.cd, View.GONE);
+                              v.setTextViewText(R.id.title, title + " — بعد " + (mn / 60) + " س " + (mn % 60) + " د");
+                          }
+                      } else {
+                          v.setViewVisibility(R.id.cd, View.GONE);
+                          v.setTextViewText(R.id.title, "خلصت صلوات النهاردة");
+                      }
                   } else {
                       for (int i = 0; i < 6; i++) { v.setTextViewText(NID[i], NAMES[i]); v.setTextViewText(TID[i], "--"); }
+                      v.setViewVisibility(R.id.cd, View.GONE);
                       v.setTextViewText(R.id.title, "افتح التطبيق مرة عشان تظهر المواقيت");
                   }
                   Intent launch = c.getPackageManager().getLaunchIntentForPackage(c.getPackageName());
@@ -175,21 +221,28 @@ jobs:
                   }
                   m.updateAppWidget(id, v);
                   try {
-                      int target = next >= 0 ? mins[next] + 1 : 24 * 60 + 1;
-                      Calendar t = Calendar.getInstance();
-                      t.set(Calendar.HOUR_OF_DAY, 0); t.set(Calendar.MINUTE, 0); t.set(Calendar.SECOND, 0); t.set(Calendar.MILLISECOND, 0);
-                      t.add(Calendar.MINUTE, target);
+                      long fire;
+                      if (next >= 0) {
+                          fire = nextMs + 2000;
+                      } else {
+                          Calendar t = Calendar.getInstance();
+                          t.set(Calendar.HOUR_OF_DAY, 0); t.set(Calendar.MINUTE, 1); t.set(Calendar.SECOND, 0); t.set(Calendar.MILLISECOND, 0);
+                          t.add(Calendar.DAY_OF_MONTH, 1);
+                          fire = t.getTimeInMillis();
+                      }
                       AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
                       Intent ti = new Intent(c, PrayerWidget.class);
                       ti.setAction(TICK);
                       PendingIntent pi = PendingIntent.getBroadcast(c, 77, ti, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-                      am.set(AlarmManager.RTC, t.getTimeInMillis(), pi);
+                      if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) am.set(AlarmManager.RTC_WAKEUP, fire, pi);
+                      else if (Build.VERSION.SDK_INT >= 23) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, fire, pi);
+                      else am.setExact(AlarmManager.RTC_WAKEUP, fire, pi);
                   } catch (Exception e) { }
               }
           }
           EOF_J
           cat > $R/layout/prayer_widget.xml <<'EOF_L'
-          <?xml version="1.0" encoding="utf-8"?><LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="10dp" android:gravity="center" android:background="@drawable/widget_bg" android:layoutDirection="rtl"><TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#F5B942" android:textSize="12sp" android:textStyle="bold" android:text="مواقيت الصلاة"/><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:layoutDirection="rtl"><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout></LinearLayout></LinearLayout>
+          <?xml version="1.0" encoding="utf-8"?><LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="10dp" android:gravity="center" android:background="@drawable/widget_bg" android:layoutDirection="rtl"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center" android:layoutDirection="rtl"><TextView android:id="@+id/title" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textColor="#F5B942" android:textSize="12sp" android:textStyle="bold" android:text="مواقيت الصلاة"/><Chronometer android:id="@+id/cd" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:visibility="gone" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold"/></LinearLayout><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:layoutDirection="rtl"><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center"><TextView android:id="@+id/n5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="11sp" android:text="--"/><TextView android:id="@+id/t5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold" android:text="--"/></LinearLayout></LinearLayout></LinearLayout>
           EOF_L
           cat > $R/drawable/widget_bg.xml <<'EOF_B'
           <?xml version="1.0" encoding="utf-8"?><shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle"><solid android:color="#E60F2A2D"/><corners android:radius="18dp"/></shape>
@@ -197,40 +250,23 @@ jobs:
           cat > $R/xml/prayer_widget_info.xml <<'EOF_I'
           <?xml version="1.0" encoding="utf-8"?><appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" android:minWidth="250dp" android:minHeight="70dp" android:updatePeriodMillis="1800000" android:initialLayout="@layout/prayer_widget" android:resizeMode="horizontal" android:widgetCategory="home_screen"/>
           EOF_I
-          sed -i 's#</application>#<receiver android:name=".PrayerWidget" android:exported="true"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/><action android:name="com.allinone.app.WIDGET_TICK"/></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/prayer_widget_info"/></receiver></application>#' android/app/src/main/AndroidManifest.xml
-      - name: Sync
-        run: npx cap sync android
-      - name: Fixed signing key (auto)
-        env:
-          KS: ${{ secrets.DEBUG_KEYSTORE_B64 }}
-        run: |
-          mkdir -p ~/.android keystore
-          if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > ~/.android/debug.keystore; echo "using key from secret"
-          elif [ -f keystore/debug.keystore ]; then
-            cp keystore/debug.keystore ~/.android/debug.keystore; echo "using key from repo"
-          else
-            keytool -genkeypair -keystore keystore/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=AllinOne,O=AllinOne,C=EG"
-            cp keystore/debug.keystore ~/.android/debug.keystore
-            git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
-            git add keystore/debug.keystore && git commit -m "add signing key" && git push || echo "could not push key"
-            echo "created new key"
-          fi
-      - name: Build debug APK
-        run: cd android && chmod +x gradlew && ./gradlew assembleDebug
-      - name: Prepare APK file
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk AllinOne.apk
-      - uses: actions/upload-artifact@v4
-        with:
-          name: AllinOne-apk
-          path: AllinOne.apk
-      - name: Publish as latest release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: AllinOne v1.0.${{ github.run_number }}
-          body: |
-            آخر إصدار ✅ — اتبنى تلقائيًا.
-            ${{ github.event.head_commit.message }}
-          files: AllinOne.apk
-          make_latest: true
+          cat > $J/WidgetPin.java <<'EOF_P'
+          package com.allinone.app;
+
+          import android.appwidget.AppWidgetManager;
+          import android.content.ComponentName;
+          import android.os.Build;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "WidgetPin")
+          public class WidgetPin extends Plugin {
+              @PluginMethod
+              public void pin(PluginCall call) {
+                  JSObject r = new JSObject();
+                  boolean ok = false;
+                  try {
+                 
