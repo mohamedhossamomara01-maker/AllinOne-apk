@@ -18,6 +18,11 @@ jobs:
         run: npm install
       - name: Add Android platform
         run: npx cap add android
+      - name: App version
+        run: |
+          G=android/app/build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"1.0.${{ github.run_number }}\"/" $G
+          grep -n "versionCode\|versionName" $G
       - name: Adhan sound
         run: |
           mkdir -p android/app/src/main/res/raw
@@ -262,11 +267,4 @@ jobs:
           import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
 
-          @CapacitorPlugin(name = "WidgetPin")
-          public class WidgetPin extends Plugin {
-              @PluginMethod
-              public void pin(PluginCall call) {
-                  JSObject r = new JSObject();
-                  boolean ok = false;
-                  try {
-                 
+          @CapacitorP
