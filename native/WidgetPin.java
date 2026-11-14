@@ -64,7 +64,9 @@ public class WidgetPin extends Plugin {
                 s.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 ctx.startActivity(s);
             } catch (Exception e) { }
-            call.reject("need_permission");
+            JSObject np = new JSObject();
+            np.put("needPerm", true);
+            call.resolve(np);
             return;
         }
         new Thread(new Runnable() {
